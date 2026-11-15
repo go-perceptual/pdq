@@ -42,10 +42,15 @@ jobs:
             echo "::error::these files are not gofmt-clean:"; echo "$unformatted"
             exit 1
           fi
+      # ⛔ `go mod tidy -diff`, not `go mod tidy` followed by `git diff
+      # go.mod go.sum`: this module has NO dependencies, so there is no
+      # go.sum, and asking git to diff a path that does not exist fails with
+      # "no such path in the working tree" and exit 128. That reads as an
+      # untidy module when the module is fine — and because the step lives in
+      # a job named gofmt, it reads as a FORMATTING failure, which it also is
+      # not. -diff asks the question directly and writes nothing.
       - name: go.mod is tidy
-        run: |
-          go mod tidy
-          git diff --exit-code go.mod go.sum
+        run: go mod tidy -diff
 
   # Nothing here is platform-specific, so nothing gets a pass for being one:
   # the same tests and the same coverage gate on all three.
