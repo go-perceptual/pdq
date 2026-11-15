@@ -36,17 +36,52 @@ func Sum(img image.Image) (Hash, Quality, error) {
 	return d.Original, q, err
 }
 
+// FloatDim is the length of a PDQF feature: the 16x16 transform, flattened.
+const FloatDim = 256
+
+// Float returns the PDQF feature of img: the same 256 transform coefficients
+// the hash is made from, BEFORE the final step that turns each into one bit.
+//
+// This is what a video hash consumes. TMK+PDQF is defined as "PDQ minus the
+// binary-quantization step", so the per-frame descriptor it averages over
+// time is exactly this vector — and keeping one implementation of the
+// transform is the point of exporting it rather than writing a second one
+// next door.
+//
+// The quality metric is the same as Sum's, and means the same thing: a
+// feature from a featureless picture describes nothing, whichever form it is
+// in.
+//
+// ⛔ Element order is row-major over the 16x16 output, so index i*16+j is row
+// i, column j — the SAME order the hash's bits are numbered in, which is what
+// lets Sum's bits and Float's signs be checked against each other.
+func Float(img image.Image) ([FloatDim]float32, Quality, error) {
+	var out [FloatDim]float32
+	dct, q, err := transform(img)
+	if err != nil {
+		return out, 0, err
+	}
+	for i := 0; i < 16; i++ {
+		for j := 0; j < 16; j++ {
+			out[i*16+j] = dct[i][j]
+		}
+	}
+	return out, q, nil
+}
+
 // SumDihedral returns the hashes of all eight symmetries of img, and the
 // quality metric, for the price of one transform.
 func SumDihedral(img image.Image) (Dihedral, Quality, error) {
 	return sum(img, true)
 }
 
-func sum(img image.Image, all bool) (Dihedral, Quality, error) {
-	var d Dihedral
+// transform runs the pipeline up to the 16x16 DCT output, which is the last
+// point at which the hash and the float feature are the same thing.
+func transform(img image.Image) ([16][16]float32, Quality, error) {
+	var dct [16][16]float32
 	luma, rows, cols, err := lumaFrom(img)
 	if err != nil {
-		return d, 0, err
+		return dct, 0, err
 	}
 
 	// Jarosz two-pass tent filter, then take the centre of each block.
@@ -63,9 +98,16 @@ func sum(img image.Image, all bool) (Dihedral, Quality, error) {
 	decimate(luma, rows, cols, &block)
 
 	q := qualityOf(&block)
-
-	var dct [16][16]float32
 	dct64To16(&block, &dct)
+	return dct, q, nil
+}
+
+func sum(img image.Image, all bool) (Dihedral, Quality, error) {
+	var d Dihedral
+	dct, q, err := transform(img)
+	if err != nil {
+		return d, 0, err
+	}
 
 	d.Original = bitsOf(&dct)
 	if all {
